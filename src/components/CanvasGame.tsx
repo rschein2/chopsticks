@@ -40,6 +40,8 @@ export const CanvasGame: React.FC = () => {
   const animationRef = useRef<number>(0);
   const imagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const firstMoveRef = useRef(false);
+  const [imagesLoaded, setImagesLoaded] = useState(false);
+  const [turnPulse, setTurnPulse] = useState(0);
   
   const HAND_WIDTH = 120;
   const HAND_HEIGHT = 60;
@@ -47,10 +49,12 @@ export const CanvasGame: React.FC = () => {
   const CANVAS_WIDTH = 800;
   const CANVAS_HEIGHT = 500;
 
-  // Preload images
+  // Preload images with loading state
   useEffect(() => {
     const styles = ['default', 'claw'];
     const numbers = [0, 1, 2, 3, 4];
+    let loadedCount = 0;
+    const totalImages = styles.length * numbers.length;
     
     styles.forEach(style => {
       numbers.forEach(num => {
@@ -58,9 +62,17 @@ export const CanvasGame: React.FC = () => {
         img.src = `/hands/${style}/${num}.png`;
         img.onerror = () => {
           imagesRef.current.delete(`${style}-${num}`);
+          loadedCount++;
+          if (loadedCount >= totalImages - 2) { // Allow for missing 0.png files
+            setImagesLoaded(true);
+          }
         };
         img.onload = () => {
           imagesRef.current.set(`${style}-${num}`, img);
+          loadedCount++;
+          if (loadedCount >= totalImages - 2) {
+            setImagesLoaded(true);
+          }
         };
       });
     });
@@ -206,15 +218,41 @@ export const CanvasGame: React.FC = () => {
     ctx.textAlign = 'center';
     ctx.fillText('Chopsticks', CANVAS_WIDTH / 2, 40);
     
-    // Draw turn indicator or winner
-    ctx.font = '20px Arial';
+    // Draw winner text only
     if (gameState.winner) {
-      ctx.fillStyle = '#10b981';
       ctx.font = 'bold 28px Arial';
+      ctx.fillStyle = '#10b981';
       ctx.fillText(`Player ${gameState.winner} Wins! 🎉`, CANVAS_WIDTH / 2, 75);
-    } else {
-      ctx.fillStyle = gameState.currentTurn === 1 ? '#3b82f6' : '#ef4444';
-      ctx.fillText(`Player ${gameState.currentTurn}'s Turn`, CANVAS_WIDTH / 2, 70);
+    }
+    
+    // Draw turn indicator arrows (pulsing)
+    if (!gameState.winner && gameStarted) {
+      const pulse = Math.sin(turnPulse) * 0.3 + 0.7;
+      const arrowSize = 20 * pulse;
+      const arrowColor = gameState.currentTurn === 1 ? '#3b82f6' : '#ef4444';
+      
+      ctx.fillStyle = arrowColor;
+      ctx.globalAlpha = pulse;
+      
+      if (gameState.currentTurn === 1) {
+        // Arrow pointing to Player 1 (left side)
+        ctx.beginPath();
+        ctx.moveTo(40, CANVAS_HEIGHT / 2);
+        ctx.lineTo(40 + arrowSize, CANVAS_HEIGHT / 2 - arrowSize/2);
+        ctx.lineTo(40 + arrowSize, CANVAS_HEIGHT / 2 + arrowSize/2);
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // Arrow pointing to Player 2 (right side)
+        ctx.beginPath();
+        ctx.moveTo(CANVAS_WIDTH - 40, CANVAS_HEIGHT / 2);
+        ctx.lineTo(CANVAS_WIDTH - 40 - arrowSize, CANVAS_HEIGHT / 2 - arrowSize/2);
+        ctx.lineTo(CANVAS_WIDTH - 40 - arrowSize, CANVAS_HEIGHT / 2 + arrowSize/2);
+        ctx.closePath();
+        ctx.fill();
+      }
+      
+      ctx.globalAlpha = 1;
     }
     
     // Draw VS in the middle
@@ -400,9 +438,9 @@ export const CanvasGame: React.FC = () => {
         ctx.fillText(style.charAt(0).toUpperCase() + style.slice(1), x + 30, y + 16);
       });
     }
-  }, [gameState, hands, hoveredHand, tapAnimation, fireworks, gameStarted, handStyle]);
+  }, [gameState, hands, hoveredHand, tapAnimation, fireworks, gameStarted, handStyle, turnPulse]);
 
-  // Animation loop
+  // Animation loop (optimized)
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -410,34 +448,47 @@ export const CanvasGame: React.FC = () => {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    const animate = () => {
-      draw(ctx);
+    let lastTime = 0;
+    const targetFPS = 30; // Reduce FPS for better performance
+    const frameInterval = 1000 / targetFPS;
+    
+    const animate = (timestamp: number) => {
+      const deltaTime = timestamp - lastTime;
       
-      // Update tap animation
-      if (tapAnimation) {
-        setTapAnimation(prev => {
-          if (!prev) return null;
-          const newProgress = prev.progress + 0.1;
-          if (newProgress >= 1) {
-            return null;
-          }
-          return { ...prev, progress: newProgress };
-        });
+      if (deltaTime >= frameInterval) {
+        lastTime = timestamp;
+        
+        // Update turn pulse
+        setTurnPulse(prev => prev + 0.15);
+        
+        // Update tap animation
+        if (tapAnimation) {
+          setTapAnimation(prev => {
+            if (!prev) return null;
+            const newProgress = prev.progress + 0.15;
+            if (newProgress >= 1) {
+              return null;
+            }
+            return { ...prev, progress: newProgress };
+          });
+        }
+        
+        // Update fireworks
+        setFireworks(prev => prev.map(fw => ({
+          ...fw,
+          x: fw.x + fw.vx,
+          y: fw.y + fw.vy,
+          vy: fw.vy + 0.3,
+          life: fw.life - 0.03
+        })).filter(fw => fw.life > 0));
+        
+        draw(ctx);
       }
-      
-      // Update fireworks
-      setFireworks(prev => prev.map(fw => ({
-        ...fw,
-        x: fw.x + fw.vx,
-        y: fw.y + fw.vy,
-        vy: fw.vy + 0.2,
-        life: fw.life - 0.02
-      })).filter(fw => fw.life > 0));
       
       animationRef.current = requestAnimationFrame(animate);
     };
     
-    animate();
+    animationRef.current = requestAnimationFrame(animate);
     
     return () => {
       if (animationRef.current) {
@@ -554,6 +605,14 @@ export const CanvasGame: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex flex-col items-center justify-center p-2">
+      {!imagesLoaded && (
+        <div className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-90 z-10">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <p className="text-gray-600">Loading game assets...</p>
+          </div>
+        </div>
+      )}
       <canvas
         ref={canvasRef}
         width={CANVAS_WIDTH}
