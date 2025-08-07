@@ -1,19 +1,28 @@
-import { useReducer } from 'react';
-import { GameState, Action, Player } from '../types/game';
+import { useReducer, useCallback } from 'react';
+import type { GameState, Action, Player, GameConfig } from '../types/game';
+
+function createInitialPlayer(id: 1 | 2, numberOfHands: number): Player {
+  return {
+    id,
+    hands: Array(numberOfHands).fill(1),  // Start with 1 finger on each hand
+    numberOfHands
+  };
+}
 
 const initialState: GameState = {
-  player1: { id: 1, leftHand: 1, rightHand: 1 },
-  player2: { id: 2, leftHand: 1, rightHand: 1 },
+  player1: createInitialPlayer(1, 2),
+  player2: createInitialPlayer(2, 2),
   currentTurn: 1,
-  selectedHand: null,
+  selectedHandIndex: null,
   winner: null,
 };
 
 function checkWinner(state: GameState): 1 | 2 | null {
-  if (state.player1.leftHand === 0 && state.player1.rightHand === 0) {
+  // Player loses if all their hands are at 0
+  if (state.player1.hands.every(h => h === 0)) {
     return 2;
   }
-  if (state.player2.leftHand === 0 && state.player2.rightHand === 0) {
+  if (state.player2.hands.every(h => h === 0)) {
     return 1;
   }
   return null;
@@ -30,41 +39,44 @@ function gameReducer(state: GameState, action: Action): GameState {
   switch (action.type) {
     case 'SELECT_HAND': {
       if (state.winner) return state;
-      return { ...state, selectedHand: action.hand };
+      const currentPlayer = state.currentTurn === 1 ? state.player1 : state.player2;
+      
+      // Can't select a dead hand (0 fingers)
+      if (currentPlayer.hands[action.handIndex] === 0) return state;
+      
+      return { ...state, selectedHandIndex: action.handIndex };
     }
 
     case 'TAP': {
-      if (state.winner || !state.selectedHand) return state;
+      if (state.winner || state.selectedHandIndex === null) return state;
       
       const currentPlayer = state.currentTurn === 1 ? state.player1 : state.player2;
       const targetPlayer = action.targetPlayer === 1 ? state.player1 : state.player2;
       
+      // Can't tap your own hands
       if (action.targetPlayer === state.currentTurn) return state;
       
-      const attackingFingers = state.selectedHand === 'left' 
-        ? currentPlayer.leftHand 
-        : currentPlayer.rightHand;
-      
+      const attackingFingers = currentPlayer.hands[state.selectedHandIndex];
       if (attackingFingers === 0) return state;
       
-      const targetFingers = action.targetHand === 'left'
-        ? targetPlayer.leftHand
-        : targetPlayer.rightHand;
-        
+      const targetFingers = targetPlayer.hands[action.targetHandIndex];
       if (targetFingers === 0) return state;
       
       const newFingers = applyFingers(targetFingers, attackingFingers);
       
+      const updatedHands = [...targetPlayer.hands];
+      updatedHands[action.targetHandIndex] = newFingers;
+      
       const updatedTargetPlayer: Player = {
         ...targetPlayer,
-        [action.targetHand === 'left' ? 'leftHand' : 'rightHand']: newFingers,
+        hands: updatedHands,
       };
       
       const newState = {
         ...state,
         [action.targetPlayer === 1 ? 'player1' : 'player2']: updatedTargetPlayer,
         currentTurn: state.currentTurn === 1 ? 2 : 1,
-        selectedHand: null,
+        selectedHandIndex: null,
       } as GameState;
       
       newState.winner = checkWinner(newState);
@@ -75,33 +87,43 @@ function gameReducer(state: GameState, action: Action): GameState {
       if (state.winner) return state;
       
       const currentPlayer = state.currentTurn === 1 ? state.player1 : state.player2;
-      const total = currentPlayer.leftHand + currentPlayer.rightHand;
+      const totalFingers = currentPlayer.hands.reduce((sum, h) => sum + h, 0);
       
-      if (action.leftAmount + action.rightAmount !== total) return state;
-      if (action.leftAmount < 0 || action.rightAmount < 0) return state;
-      if (action.leftAmount > 4 || action.rightAmount > 4) return state;
+      // Validate the new distribution
+      const newTotal = action.distribution.reduce((sum, h) => sum + h, 0);
+      if (newTotal !== totalFingers) return state;
+      if (action.distribution.length !== currentPlayer.numberOfHands) return state;
+      if (action.distribution.some(h => h < 0 || h > 4)) return state;
       
-      if (action.leftAmount === currentPlayer.leftHand && 
-          action.rightAmount === currentPlayer.rightHand) {
-        return state;
-      }
+      // Can't split to the same configuration
+      const isSame = action.distribution.every((h, i) => h === currentPlayer.hands[i]);
+      if (isSame) return state;
       
       const updatedPlayer: Player = {
         ...currentPlayer,
-        leftHand: action.leftAmount,
-        rightHand: action.rightAmount,
+        hands: action.distribution,
       };
       
       return {
         ...state,
         [state.currentTurn === 1 ? 'player1' : 'player2']: updatedPlayer,
         currentTurn: state.currentTurn === 1 ? 2 : 1,
-        selectedHand: null,
+        selectedHandIndex: null,
       } as GameState;
     }
 
     case 'RESET':
       return initialState;
+
+    case 'SETUP_GAME': {
+      return {
+        player1: createInitialPlayer(1, action.config.player1Hands),
+        player2: createInitialPlayer(2, action.config.player2Hands),
+        currentTurn: 1,
+        selectedHandIndex: null,
+        winner: null,
+      };
+    }
 
     default:
       return state;
@@ -111,21 +133,25 @@ function gameReducer(state: GameState, action: Action): GameState {
 export function useGameLogic() {
   const [gameState, dispatch] = useReducer(gameReducer, initialState);
 
-  const selectHand = (hand: 'left' | 'right') => {
-    dispatch({ type: 'SELECT_HAND', hand });
-  };
+  const selectHand = useCallback((handIndex: number) => {
+    dispatch({ type: 'SELECT_HAND', handIndex });
+  }, []);
 
-  const tap = (targetPlayer: 1 | 2, targetHand: 'left' | 'right') => {
-    dispatch({ type: 'TAP', targetPlayer, targetHand });
-  };
+  const tap = useCallback((targetPlayer: 1 | 2, targetHandIndex: number) => {
+    dispatch({ type: 'TAP', targetPlayer, targetHandIndex });
+  }, []);
 
-  const split = (leftAmount: number, rightAmount: number) => {
-    dispatch({ type: 'SPLIT', leftAmount, rightAmount });
-  };
+  const split = useCallback((distribution: number[]) => {
+    dispatch({ type: 'SPLIT', distribution });
+  }, []);
 
-  const reset = () => {
+  const reset = useCallback(() => {
     dispatch({ type: 'RESET' });
-  };
+  }, []);
+
+  const setupGame = useCallback((config: GameConfig) => {
+    dispatch({ type: 'SETUP_GAME', config });
+  }, []);
 
   return {
     gameState,
@@ -133,5 +159,6 @@ export function useGameLogic() {
     tap,
     split,
     reset,
+    setupGame,
   };
 }

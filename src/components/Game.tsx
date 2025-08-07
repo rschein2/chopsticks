@@ -1,101 +1,115 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useGameLogic } from '../hooks/useGameLogic';
 import { Player } from './Player';
 import { GameControls } from './GameControls';
+import { GameSetup } from './GameSetup';
+import type { GameConfig } from '../types/game';
 
 export const Game: React.FC = () => {
-  const { gameState, selectHand, tap, split, reset } = useGameLogic();
-  const { player1, player2, currentTurn, selectedHand, winner } = gameState;
+  const { gameState, selectHand, tap, split, reset, setupGame } = useGameLogic();
+  const { player1, player2, currentTurn, selectedHandIndex, winner } = gameState;
+  const [showSetup, setShowSetup] = useState(true);
+  const [gameConfig, setGameConfig] = useState<GameConfig | null>(null);
   
-  const handlePlayer1HandClick = (hand: 'left' | 'right') => {
+  const handleStartGame = (config: GameConfig) => {
+    setupGame(config);
+    setGameConfig(config);
+    setShowSetup(false);
+  };
+
+  const handleReset = () => {
+    setShowSetup(true);
+    reset();
+  };
+  
+  const handlePlayer1HandClick = (handIndex: number) => {
     if (currentTurn === 1 && !winner) {
-      selectHand(hand);
+      selectHand(handIndex);
+    } else if (currentTurn === 2 && selectedHandIndex !== null && !winner) {
+      tap(1, handIndex);
     }
   };
   
-  const handlePlayer2HandClick = (hand: 'left' | 'right') => {
-    if (currentTurn === 1 && selectedHand && !winner) {
-      tap(2, hand);
-    } else if (currentTurn === 2 && !winner) {
-      selectHand(hand);
+  const handlePlayer2HandClick = (handIndex: number) => {
+    if (currentTurn === 2 && !winner) {
+      selectHand(handIndex);
+    } else if (currentTurn === 1 && selectedHandIndex !== null && !winner) {
+      tap(2, handIndex);
     }
   };
-  
-  const handlePlayer1TapClick = (hand: 'left' | 'right') => {
-    if (currentTurn === 2 && selectedHand && !winner) {
-      tap(1, hand);
-    }
-  };
+
+  if (showSetup) {
+    return <GameSetup onStartGame={handleStartGame} />;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 py-8">
-      <div className="max-w-4xl mx-auto px-4">
+      <div className="max-w-6xl mx-auto px-4">
         <h1 className="text-4xl font-bold text-center mb-8 text-gray-800">
           Chopsticks Game
         </h1>
         
         <div className="mb-6">
-          <div className="text-center mb-2">
-            <p className="text-lg text-gray-600">
+          <div className="text-center">
+            <p className="text-xl font-semibold text-gray-700">
               {!winner && (
                 <>
-                  {currentTurn === 1 ? "Player 1's" : "Player 2's"} turn
-                  {selectedHand && ` - ${selectedHand} hand selected`}
+                  <span className={`px-3 py-1 rounded-full ${currentTurn === 1 ? 'bg-blue-200 text-blue-800' : 'bg-red-200 text-red-800'}`}>
+                    Player {currentTurn}'s Turn
+                  </span>
+                  {selectedHandIndex !== null && (
+                    <span className="ml-3 text-base text-gray-600">
+                      Hand {selectedHandIndex + 1} selected
+                    </span>
+                  )}
                 </>
               )}
             </p>
-            {!winner && !selectedHand && (
-              <p className="text-sm text-gray-500">
-                Select one of your hands to attack with
-              </p>
-            )}
-            {!winner && selectedHand && (
-              <p className="text-sm text-gray-500">
-                Tap an opponent's hand to attack, or use the split action
-              </p>
-            )}
           </div>
         </div>
         
-        <div className="space-y-6">
-          <Player
-            player={player2}
-            isCurrentTurn={currentTurn === 2}
-            selectedHand={currentTurn === 2 ? selectedHand : null}
-            onHandClick={currentTurn === 2 ? handlePlayer2HandClick : handlePlayer1TapClick}
-            isOpponent={currentTurn === 1}
-          />
-          
-          <div className="flex items-center justify-center">
-            <div className="text-4xl">⚔️</div>
-          </div>
-          
+        <div className="flex gap-8 items-start justify-center">
           <Player
             player={player1}
             isCurrentTurn={currentTurn === 1}
-            selectedHand={currentTurn === 1 ? selectedHand : null}
-            onHandClick={currentTurn === 1 ? handlePlayer1HandClick : handlePlayer2HandClick}
+            selectedHandIndex={currentTurn === 1 ? selectedHandIndex : null}
+            onHandClick={handlePlayer1HandClick}
             isOpponent={currentTurn === 2}
+            skinTheme={gameConfig?.skinTheme}
+          />
+          
+          <div className="flex flex-col items-center justify-center min-h-[300px]">
+            <div className="text-6xl mb-4">⚔️</div>
+            <div className="text-2xl font-bold text-gray-600">VS</div>
+          </div>
+          
+          <Player
+            player={player2}
+            isCurrentTurn={currentTurn === 2}
+            selectedHandIndex={currentTurn === 2 ? selectedHandIndex : null}
+            onHandClick={handlePlayer2HandClick}
+            isOpponent={currentTurn === 1}
+            skinTheme={gameConfig?.skinTheme}
           />
         </div>
         
         <GameControls
           currentPlayer={currentTurn === 1 ? player1 : player2}
           onSplit={split}
-          onReset={reset}
+          onReset={handleReset}
           winner={winner}
         />
         
-        <div className="mt-8 p-4 bg-white rounded-lg shadow">
-          <h3 className="font-bold mb-2 text-gray-800">How to Play:</h3>
-          <ul className="text-sm text-gray-600 space-y-1">
-            <li>• Each player starts with 1 finger on each hand</li>
-            <li>• Select your hand, then tap opponent's hand to add your fingers to theirs</li>
-            <li>• Exactly 5 fingers = hand is out (becomes 0)</li>
-            <li>• More than 5 wraps around (6→1, 7→2, etc.)</li>
-            <li>• You can split/redistribute your own fingers instead of attacking</li>
-            <li>• Win by eliminating both opponent hands!</li>
-          </ul>
+        <div className="mt-8 p-4 bg-white rounded-lg shadow max-w-2xl mx-auto">
+          <h3 className="font-bold mb-2 text-gray-800">Game Info:</h3>
+          <div className="grid grid-cols-2 gap-4 text-sm text-gray-600">
+            <div>
+              <strong>Player 1:</strong> {player1.numberOfHands} hands, {player1.hands.filter(h => h > 0).length} active
+            </div>
+            <div>
+              <strong>Player 2:</strong> {player2.numberOfHands} hands, {player2.hands.filter(h => h > 0).length} active
+            </div>
+          </div>
         </div>
       </div>
     </div>

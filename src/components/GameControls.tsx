@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Player } from '../types/game';
+import type { Player } from '../types/game';
 
 interface GameControlsProps {
   currentPlayer: Player;
-  onSplit: (leftAmount: number, rightAmount: number) => void;
+  onSplit: (distribution: number[]) => void;
   onReset: () => void;
   winner: 1 | 2 | null;
 }
@@ -15,27 +15,34 @@ export const GameControls: React.FC<GameControlsProps> = ({
   winner,
 }) => {
   const [showSplitDialog, setShowSplitDialog] = useState(false);
-  const [leftSplit, setLeftSplit] = useState(0);
-  const [rightSplit, setRightSplit] = useState(0);
+  const [splitDistribution, setSplitDistribution] = useState<number[]>([]);
   
-  const total = currentPlayer.leftHand + currentPlayer.rightHand;
-  const canSplit = total > 1 && (currentPlayer.leftHand > 0 || currentPlayer.rightHand > 0);
+  const totalFingers = currentPlayer.hands.reduce((sum, h) => sum + h, 0);
+  const activeHands = currentPlayer.hands.filter(h => h > 0).length;
+  const canSplit = totalFingers > 1 && activeHands >= 1;
   
   const handleSplit = () => {
-    if (leftSplit + rightSplit === total && 
-        (leftSplit !== currentPlayer.leftHand || rightSplit !== currentPlayer.rightHand)) {
-      onSplit(leftSplit, rightSplit);
+    const newTotal = splitDistribution.reduce((sum, h) => sum + h, 0);
+    const isSame = splitDistribution.every((h, i) => h === currentPlayer.hands[i]);
+    
+    if (newTotal === totalFingers && !isSame) {
+      onSplit(splitDistribution);
       setShowSplitDialog(false);
-      setLeftSplit(0);
-      setRightSplit(0);
     }
   };
   
   const openSplitDialog = () => {
-    setLeftSplit(currentPlayer.leftHand);
-    setRightSplit(currentPlayer.rightHand);
+    setSplitDistribution([...currentPlayer.hands]);
     setShowSplitDialog(true);
   };
+
+  const updateHandValue = (index: number, value: number) => {
+    const newDist = [...splitDistribution];
+    newDist[index] = Math.max(0, Math.min(4, value));
+    setSplitDistribution(newDist);
+  };
+
+  const currentTotal = splitDistribution.reduce((sum, h) => sum + h, 0);
 
   return (
     <div className="text-center mt-6">
@@ -67,46 +74,60 @@ export const GameControls: React.FC<GameControlsProps> = ({
       
       {showSplitDialog && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-xl shadow-2xl">
+          <div className="bg-white p-6 rounded-xl shadow-2xl max-w-md w-full">
             <h3 className="text-xl font-bold mb-4">Split Your Fingers</h3>
-            <p className="mb-4 text-gray-600">Total fingers: {total}</p>
+            <p className="mb-4 text-gray-600">Total fingers: {totalFingers}</p>
             
-            <div className="flex gap-4 mb-4">
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Left Hand</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="4"
-                  value={leftSplit}
-                  onChange={(e) => setLeftSplit(Number(e.target.value))}
-                  className="w-20 p-2 border rounded text-center"
-                />
-              </div>
-              <div>
-                <label className="block text-sm text-gray-600 mb-1">Right Hand</label>
-                <input
-                  type="number"
-                  min="0"
-                  max="4"
-                  value={rightSplit}
-                  onChange={(e) => setRightSplit(Number(e.target.value))}
-                  className="w-20 p-2 border rounded text-center"
-                />
-              </div>
+            <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+              {splitDistribution.map((value, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <label className="text-sm text-gray-600 w-20">
+                    Hand {index + 1}:
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="4"
+                    value={value}
+                    onChange={(e) => updateHandValue(index, Number(e.target.value))}
+                    className="w-16 p-2 border rounded text-center"
+                  />
+                  <div className="flex gap-1">
+                    <button
+                      onClick={() => updateHandValue(index, value - 1)}
+                      className="w-8 h-8 bg-gray-200 rounded hover:bg-gray-300"
+                    >
+                      -
+                    </button>
+                    <button
+                      onClick={() => updateHandValue(index, value + 1)}
+                      className="w-8 h-8 bg-gray-200 rounded hover:bg-gray-300"
+                    >
+                      +
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
             
             <div className="mb-4">
-              <p className={`text-sm ${leftSplit + rightSplit === total ? 'text-green-600' : 'text-red-600'}`}>
-                Sum: {leftSplit + rightSplit} / {total}
+              <p className={`text-sm font-bold ${currentTotal === totalFingers ? 'text-green-600' : 'text-red-600'}`}>
+                Current Total: {currentTotal} / {totalFingers}
               </p>
+              {splitDistribution.every((h, i) => h === currentPlayer.hands[i]) && (
+                <p className="text-sm text-orange-600 mt-1">
+                  Distribution must be different from current
+                </p>
+              )}
             </div>
             
             <div className="flex gap-2">
               <button
                 onClick={handleSplit}
-                disabled={leftSplit + rightSplit !== total || 
-                         (leftSplit === currentPlayer.leftHand && rightSplit === currentPlayer.rightHand)}
+                disabled={
+                  currentTotal !== totalFingers || 
+                  splitDistribution.every((h, i) => h === currentPlayer.hands[i])
+                }
                 className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600 disabled:bg-gray-300 disabled:cursor-not-allowed"
               >
                 Apply Split
